@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ClamCenter
+Comment=Manage ClamAV, Quarantine Vault, and System Audits
+Exec=kitty -e sudo /usr/local/bin/defender
+Icon=security-high
+Terminal=false
+Categories=System;Security;Settings;
+Keywords=clamav;antivirus;security;defender;quarantine;

@@ -1,0 +1,295 @@
+#!/usr/bin/env bash
+
+QUARANTINE_DIR="/var/log/clamav/quarantine"
+WHITELIST_FILE="/var/lib/clamav/local.fp"
+SECRET_CODE="777" # Hidden Passcode to unlock Malware Sandbox Vault
+ZIP_PASSWORD="infected"
+
+sudo mkdir -p "$QUARANTINE_DIR"
+
+# Standard Terminal Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Helper function to check systemd service status
+get_status() {
+    if systemctl is-active --quiet "$1" 2>/dev/null; then
+        echo -e "${GREEN}[ACTIVE]${NC}"
+    else
+        echo -e "${RED}[INACTIVE]${NC}"
+    fi
+}
+
+# --- Hidden Vault Submenu ---
+hidden_vault_menu() {
+    while true; do
+        clear
+        echo -e "${MAGENTA}====================================================${NC}"
+        echo -e "${MAGENTA}          RESTRICTED: MALWARE ANALYSIS VAULT        ${NC}"
+        echo -e "${MAGENTA}====================================================${NC}"
+        echo -e " Storage Path    : ${QUARANTINE_DIR}"
+        echo -e " Archive Standard: Password-Protected ZIP (${YELLOW}${ZIP_PASSWORD}${NC})"
+        echo -e "${MAGENTA}----------------------------------------------------${NC}"
+        
+        echo -e " [1] List Encrypted Samples"
+        echo -e " [2] Export Sample to VM Sandbox / Target Directory"
+        echo -e " [3] Inspect Archive Headers & File Metadata"
+        echo -e " [4] Permanently Purge Encrypted Samples"
+        echo -e " [b] Back to Main Menu"
+        echo -e "${MAGENTA}----------------------------------------------------${NC}"
+        read -p "Select Vault Option: " VCHOICE
+
+        case "$VCHOICE" in
+            1)
+                echo -e "\n${YELLOW}--- Encrypted Malware Archives ---${NC}"
+                sudo ls -lh "$QUARANTINE_DIR"/*.zip 2>/dev/null || echo "No encrypted archives stored."
+                read -p $'\nPress Enter to return...'
+                ;;
+            2)
+                echo -e "\n${YELLOW}--- Export Sample for Sandbox Analysis ---${NC}"
+                sudo ls -1 "$QUARANTINE_DIR"/*.zip 2>/dev/null
+                echo ""
+                read -p "Enter exact zip filename to export: " ZIP_FILE
+                read -p "Enter destination path (e.g. /home/$USER/Desktop): " DEST_DIR
+
+                FULL_PATH="$QUARANTINE_DIR/$ZIP_FILE"
+                if [ -f "$FULL_PATH" ] && [ -d "$DEST_DIR" ]; then
+                    sudo cp "$FULL_PATH" "$DEST_DIR/"
+                    sudo chown "$USER:$USER" "$DEST_DIR/$ZIP_FILE"
+                    echo -e "\n${GREEN}[+] Exported successfully to: $DEST_DIR/$ZIP_FILE${NC}"
+                    echo -e "Extraction password in VM: ${YELLOW}${ZIP_PASSWORD}${NC}"
+                else
+                    echo -e "\n${RED}[-] Invalid archive or destination directory.${NC}"
+                fi
+                read -p $'\nPress Enter to return...'
+                ;;
+            3)
+                echo -e "\n${YELLOW}--- Archive Metadata Inspection ---${NC}"
+                sudo ls -1 "$QUARANTINE_DIR"/*.zip 2>/dev/null
+                echo ""
+                read -p "Enter zip filename to inspect: " ZIP_FILE
+                FULL_PATH="$QUARANTINE_DIR/$ZIP_FILE"
+                
+                if [ -f "$FULL_PATH" ]; then
+                    echo -e "\n${CYAN}Archive Contents:${NC}"
+                    unzip -P "$ZIP_PASSWORD" -l "$FULL_PATH"
+                else
+                    echo -e "\n${RED}[-] File not found.${NC}"
+                fi
+                read -p $'\nPress Enter to return...'
+                ;;
+            4)
+                echo -e "\n${RED}WARNING: Permanently destroying all vaulted malware samples!${NC}"
+                read -p "Type 'confirm' to proceed: " CONFIRM_VAULT
+                if [[ "$CONFIRM_VAULT" == "confirm" ]]; then
+                    sudo rm -f "$QUARANTINE_DIR"/*.zip
+                    echo -e "${GREEN}[+] Vault cleared.${NC}"
+                fi
+                read -p $'\nPress Enter to return...'
+                ;;
+            b|B)
+                break
+                ;;
+            *)
+                echo -e "${RED}Invalid selection.${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# --- Main Interface Loop ---
+while true; do
+    clear
+    echo -e "${CYAN}====================================================${NC}"
+    echo -e "${CYAN}             LINUX SECURITY & DEFENSE CENTER        ${NC}"
+    echo -e "${CYAN}====================================================${NC}"
+    
+    # Real-Time Service Status Panel
+    echo -e "${BOLD}SYSTEM SERVICES STATUS:${NC}"
+    echo -e "  ClamAV Daemon (clamd)    : $(get_status clamav-daemon.service)"
+    echo -e "  ClamAV On-Access Scanner : $(get_status clamav-clamonacc.service)"
+    echo -e "  AppArmor                 : $(get_status apparmor.service)"
+    echo -e "  Firewall (UFW)           : $(get_status ufw.service)"
+    echo -e "  Freshclam (Auto-Updates) : $(get_status clamav-freshclam.service)"
+    echo -e "${CYAN}----------------------------------------------------${NC}"
+    
+    echo -e " [1] Quarantine Manager (Select / Restore / Delete)"
+    echo -e " [2] Manual Fast Scan (Target File/Folder via clamscan)"
+    echo -e " [3] Update Virus Definitions (freshclam)"
+    echo -e " [4] AppArmor & Firewall Management (GUFW)"
+    echo -e " [5] Intrusion & Rootkit Audit (rkhunter / lynis)"
+    echo -e " [6] Purge Entire Quarantine"
+    echo -e " [q] Exit Security Center"
+    echo -e "${CYAN}----------------------------------------------------${NC}"
+    read -p "Select an option: " OPTION
+
+    case "$OPTION" in
+        1)
+            while true; do
+                clear
+                echo -e "${YELLOW}=== QUARANTINE MANAGER ===${NC}"
+                
+                FILES=($(sudo ls "$QUARANTINE_DIR" 2>/dev/null | grep -v '\.orig_path$'))
+
+                if [ ${#FILES[@]} -eq 0 ]; then
+                    echo -e "${GREEN}Quarantine is currently empty.${NC}"
+                    read -p "Press Enter to return to main menu..."
+                    break
+                fi
+
+                echo "Files in quarantine:"
+                for i in "${!FILES[@]}"; do
+                    echo "  [$((i+1))] ${FILES[$i]}"
+                done
+                echo "----------------------------------------------------"
+                echo "Tip: Enter multiple numbers separated by space (e.g., '1 3 4'), 'all', or 'b' for back."
+                read -p "Selection: " SELECTIONS
+
+                if [[ "$SELECTIONS" == "b" ]]; then
+                    break
+                fi
+
+                SELECTED_INDEXES=()
+                if [[ "$SELECTIONS" == "all" ]]; then
+                    for i in "${!FILES[@]}"; do SELECTED_INDEXES+=("$i"); done
+                else
+                    for num in $SELECTIONS; do
+                        if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "${#FILES[@]}" ]; then
+                            SELECTED_INDEXES+=("$((num-1))")
+                        fi
+                    done
+                fi
+
+                if [ ${#SELECTED_INDEXES[@]} -eq 0 ]; then
+                    echo -e "${RED}No valid items selected.${NC}"
+                    sleep 1
+                    continue
+                fi
+
+                echo ""
+                echo "Actions for selected item(s):"
+                echo " 1) Restore & Add to Whitelist (Safe)"
+                echo " 2) Delete Permanently"
+                echo " 3) Cancel"
+                read -p "Action [1-3]: " ACT
+
+                case "$ACT" in
+                    1)
+                        for idx in "${SELECTED_INDEXES[@]}"; do
+                            FILE_NAME="${FILES[$idx]}"
+                            FILE_PATH="$QUARANTINE_DIR/$FILE_NAME"
+                            ORIG_PATH=$(sudo cat "$FILE_PATH.orig_path" 2>/dev/null)
+
+                            if [ -n "$ORIG_PATH" ] && [ -f "$FILE_PATH" ]; then
+                                sudo mv "$FILE_PATH" "$ORIG_PATH"
+                                sudo rm -f "$FILE_PATH.orig_path"
+                                
+                                HASH=$(sha256sum "$ORIG_PATH" | awk '{print $1}')
+                                echo "$HASH" | sudo tee -a "$WHITELIST_FILE" > /dev/null
+                                echo -e "${GREEN}[+] Restored & Whitelisted:${NC} $FILE_NAME -> $ORIG_PATH"
+                            else
+                                echo -e "${RED}[-] Failed to restore $FILE_NAME (original path missing).${NC}"
+                            fi
+                        done
+                        sudo systemctl reload clamav-daemon.service 2>/dev/null
+                        read -p "Press Enter to continue..."
+                        ;;
+                    2)
+                        for idx in "${SELECTED_INDEXES[@]}"; do
+                            FILE_NAME="${FILES[$idx]}"
+                            sudo rm -f "$QUARANTINE_DIR/$FILE_NAME" "$QUARANTINE_DIR/$FILE_NAME.orig_path"
+                            echo -e "${RED}[+] Deleted:${NC} $FILE_NAME"
+                        done
+                        read -p "Press Enter to continue..."
+                        ;;
+                    3)
+                        ;;
+                esac
+            done
+            ;;
+
+        2)
+            clear
+            echo -e "${YELLOW}=== MANUAL SCAN ===${NC}"
+            read -e -p "Enter full path to file or folder to scan: " SCAN_PATH
+            if [ -e "$SCAN_PATH" ]; then
+                echo -e "${CYAN}Scanning $SCAN_PATH...${NC}"
+                sudo clamscan --infected --recursive --move="$QUARANTINE_DIR" "$SCAN_PATH"
+            else
+                echo -e "${RED}Path does not exist.${NC}"
+            fi
+            read -p "Press Enter to return to main menu..."
+            ;;
+
+        3)
+            clear
+            echo -e "${YELLOW}=== UPDATING DEFINITIONS ===${NC}"
+            sudo freshclam
+            read -p "Press Enter to return to main menu..."
+            ;;
+
+        4)
+            clear
+            echo -e "${YELLOW}=== APPARMOR & FIREWALL STATUS ===${NC}"
+            echo -e "${CYAN}--- AppArmor Profiles ---${NC}"
+            sudo aa-status 2>/dev/null | head -n 12
+            echo ""
+            echo -e "${CYAN}--- UFW Firewall Status ---${NC}"
+            sudo ufw status verbose
+            echo ""
+            read -p "Launch GUFW graphical interface? (y/N): " GUFW_LAUNCH
+            if [[ "$GUFW_LAUNCH" =~ ^[Yy]$ ]]; then
+                gufw >/dev/null 2>&1 &
+            fi
+            read -p "Press Enter to return to main menu..."
+            ;;
+
+        5)
+            clear
+            echo -e "${YELLOW}=== INTRUSION & ROOTKIT AUDIT ===${NC}"
+            echo " [1] Quick Rootkit Scan (rkhunter)"
+            echo " [2] Deep Rootkit Scan (chkrootkit)"
+            echo " [3] Full System Security Audit (lynis)"
+            echo " [b] Back"
+            read -p "Choose audit type: " AUDIT_CHOICE
+
+            case "$AUDIT_CHOICE" in
+                1) sudo rkhunter --check --sk ;;
+                2) sudo chkrootkit ;;
+                3) sudo lynis audit system ;;
+            esac
+            read -p "Press Enter to return to main menu..."
+            ;;
+
+        6)
+            clear
+            echo -e "${RED}Are you sure you want to delete ALL quarantined files?${NC}"
+            read -p "Type 'yes' to confirm: " CONFIRM
+            if [[ "$CONFIRM" == "yes" ]]; then
+                sudo rm -rf "${QUARANTINE_DIR:?}"/*
+                echo -e "${GREEN}[+] Quarantine completely purged.${NC}"
+            fi
+            read -p "Press Enter to return to main menu..."
+            ;;
+
+        "$SECRET_CODE")
+            hidden_vault_menu
+            ;;
+
+        q|Q)
+            echo "Exiting Security Center."
+            exit 0
+            ;;
+
+        *)
+            echo -e "${RED}Invalid option.${NC}"
+            sleep 1
+            ;;
+    esac
+done

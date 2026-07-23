@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+QUARANTINE_DIR="/var/log/clamav/quarantine"
+ZIP_PASSWORD="infected"
+
+mkdir -p "$QUARANTINE_DIR"
+
+# Watch for new files moved or created in quarantine
+inotifywait -m -e moved_to,create --format '%f' "$QUARANTINE_DIR" | while read -r FILE_NAME; do
+    
+    # Ignore hidden files, lock files, tracking files, and already encrypted .zip files
+    if [[ "$FILE_NAME" == .* ]] || [[ "$FILE_NAME" == *.orig_path ]] || [[ "$FILE_NAME" == *.lock* ]] || [[ "$FILE_NAME" == *.zip ]]; then
+        continue
+    fi
+
+    TARGET_FILE="$QUARANTINE_DIR/$FILE_NAME"
+
+    # Wait 1 second to ensure clamonacc has finished writing the file
+    sleep 1
+
+    if [ -f "$TARGET_FILE" ]; then
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        ZIP_NAME="${FILE_NAME}_${TIMESTAMP}.zip"
+
+        # Encrypt the malware sample into a zip archive and delete original plain text
+        cd "$QUARANTINE_DIR" || exit
+        zip -q -P "$ZIP_PASSWORD" "$ZIP_NAME" "$FILE_NAME" && rm -f "$TARGET_FILE"
+
+        # Cross-Distro Notification Logic (Works on GNOME, KDE, Wayland & X11)
+        for USER_UID in $(ls /run/user/ 2>/dev/null | grep -E '^[0-9]+$'); do
+            # Skip root user
+            [ "$USER_UID" -eq 0 ] && continue
+            
+            ACTIVE_USER=$(id -nu "$USER_UID" 2>/dev/null)
+            [ -z "$ACTIVE_USER" ] && continue
+
+            DBUS_BUS="/run/user/${USER_UID}/bus"
+            
+            if [ -S "$DBUS_BUS" ]; then
+                # Method 1: Send via DBus socket using active user context
+                sudo -u "$ACTIVE_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=${DBUS_BUS}" \
+                notify-send -u critical -i security-high \
+                "🛡️ ClamAV Threat Vaulted!" \
+                "File: ${FILE_NAME}\nEncrypted & Locked in Zip (Pass: ${ZIP_PASSWORD})" 2>/dev/null || \
+                
+                # Method 2: Systemd-run fallback
+                systemd-run --machine="${ACTIVE_USER}@.host" --user --quiet \
+                notify-send -u critical -i security-high \
+                "🛡️ ClamAV Threat Vaulted!" \
+                "File: ${FILE_NAME}\nEncrypted & Locked in Zip (Pass: ${ZIP_PASSWORD})" 2>/dev/null
+            fi
+        done
+    fi
+done

@@ -1,0 +1,13 @@
+[Unit]
+Description=ClamAV Quarantine Desktop Notification Watcher
+After=clamav-daemon.service clamd.service clamav-clamonacc.service
+Wants=clamav-clamonacc.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/quarantine-notifier
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
